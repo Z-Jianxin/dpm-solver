@@ -134,6 +134,7 @@ def get_sampling_fn(config, sde, shape, inverse_scaler, eps):
                                   thresholding=config.sampling.thresholding,
                                   rtol=config.sampling.rtol,
                                   atol=config.sampling.atol,
+                                  K_fourier=config.sampling.K_fourier,
                                   device=config.device)
   else:
     raise ValueError(f"Sampler name {sampler_name} unknown.")
@@ -506,7 +507,7 @@ def get_ode_sampler(sde, shape, inverse_scaler,
 def get_dpm_solver_sampler(sde, shape, inverse_scaler, steps=10, eps=1e-3,
                     skip_type="logSNR", method="singlestep", order=3,
                     denoise=False, algorithm_type="dpmsolver", thresholding=False,
-                    rtol=0.05, atol=0.0078, device='cuda'):
+                    rtol=0.05, atol=0.0078, K_fourier=20, device='cuda'):
   """Create a Predictor-Corrector (PC) sampler.
 
   Args:
@@ -552,6 +553,7 @@ def get_dpm_solver_sampler(sde, shape, inverse_scaler, steps=10, eps=1e-3,
         denoise_to_zero=denoise,
         atol=atol,
         rtol=rtol,
+        K_fourier=K_fourier,
         lower_order_final=False,
       )
       return inverse_scaler(x), steps

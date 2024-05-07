@@ -462,15 +462,9 @@ class DPM_Solver:
         score = self.model(x, t)
         sigma_t = self.noise_schedule.marginal_std(t)
         g_t = self.noise_schedule.get_diff(t)
-        #print("using Wiener representation to approximate Brownian motion")
-        #print(f"times is {t}")
-        #print(f"sigma_t = {sigma_t}")
-        #print(f"g_t = {g_t}")
         ################Wiener's Representation################
         cos_nt = torch.cos(np.pi * n[:, None] * t)  # Shape: [K, batch_size]
         cos_nt = torch.transpose(cos_nt, 0, 1) # Shape: [batch_size, K]
-        #print(cos_nt.shape, cos_nt[:, None, None, None, :].shape)
-        #print("cosnt=",cos_nt)
         # gaussians should now has shape B * C * W * H * K
         sum_cos_nt = torch.sum(gaussians[:, :, :, :, 1:] * cos_nt[:, None, None, None, :], dim=-1)
         dB = torch.sqrt(torch.tensor(2.0))*sum_cos_nt+gaussians[:, :, :, :, 0]

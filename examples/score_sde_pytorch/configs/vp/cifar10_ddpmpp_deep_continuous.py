@@ -43,6 +43,7 @@ def get_config():
   sampling.noise_removal = False
   sampling.steps = 10
   sampling.skip_type = 'logSNR'
+  sampling.K_fourier = 40
   sampling.rtol = 0.05
   sampling.atol = 0.05
 
