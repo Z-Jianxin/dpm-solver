@@ -133,6 +133,7 @@ def get_sampling_fn(config, sde, shape, inverse_scaler, eps):
                                   algorithm_type=config.sampling.algorithm_type,
                                   thresholding=config.sampling.thresholding,
                                   rtol=config.sampling.rtol,
+                                  atol=config.sampling.atol,
                                   device=config.device)
   else:
     raise ValueError(f"Sampler name {sampler_name} unknown.")

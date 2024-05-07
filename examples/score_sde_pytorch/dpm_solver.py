@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import math
+import numpy as np
 
 
 class NoiseScheduleVP:
@@ -12,6 +13,7 @@ class NoiseScheduleVP:
             continuous_beta_0=0.1,
             continuous_beta_1=20.,
             dtype=torch.float32,
+            sde_type='vp'
         ):
         """Create a wrapper class for the forward SDE (VP type).
 
@@ -96,6 +98,10 @@ class NoiseScheduleVP:
         if schedule not in ['discrete', 'linear', 'cosine']:
             raise ValueError("Unsupported noise schedule {}. The schedule needs to be 'discrete' or 'linear' or 'cosine'".format(schedule))
 
+        if sde_type not in ['vp']:
+            raise ValueError("Unsupported sde {}. The sde to be 'vp'".format(sde_type))
+        self.sde_type = sde_type
+
         self.schedule = schedule
         if schedule == 'discrete':
             if betas is not None:
@@ -174,6 +180,17 @@ class NoiseScheduleVP:
             t = t_fn(log_alpha)
             return t
 
+    def get_diff(self, t):
+        if self.sde_type == "vp":
+            _, g = self.vp_drift_diff(t)
+        else:
+            raise NotImplementedError("This method should be overridden by subclasses.")
+        return g
+
+    def vp_drift_diff(self, t):
+        drift_coeiff = t/self.T * self.beta_1 + (1-t)/self.T * self.beta_0
+        diffusion = torch.sqrt(drift_coeiff)
+        return -drift_coeiff/2.0, diffusion
 
 def model_wrapper(
     model,
@@ -411,7 +428,7 @@ class DPM_Solver:
         """
         self.model = lambda x, t: model_fn(x, t.expand((x.shape[0])))
         self.noise_schedule = noise_schedule
-        assert algorithm_type in ["dpmsolver", "dpmsolver++"]
+        assert algorithm_type in ["dpmsolver", "dpmsolver++", "dpmsolver_approx"]
         self.algorithm_type = algorithm_type
         if correcting_x0_fn == "dynamic_thresholding":
             self.correcting_x0_fn = self.dynamic_thresholding_fn
@@ -438,6 +455,28 @@ class DPM_Solver:
         """
         return self.model(x, t)
 
+    def noise_prediction_fn_approx(self, x, t, gaussians, n):
+        """
+        Return the noise prediction model with approximations to brownian motion.
+        """
+        score = self.model(x, t)
+        sigma_t = self.noise_schedule.marginal_std(t)
+        g_t = self.noise_schedule.get_diff(t)
+        #print("using Wiener representation to approximate Brownian motion")
+        #print(f"times is {t}")
+        #print(f"sigma_t = {sigma_t}")
+        #print(f"g_t = {g_t}")
+        ################Wiener's Representation################
+        cos_nt = torch.cos(np.pi * n[:, None] * t)  # Shape: [K, batch_size]
+        cos_nt = torch.transpose(cos_nt, 0, 1) # Shape: [batch_size, K]
+        #print(cos_nt.shape, cos_nt[:, None, None, None, :].shape)
+        #print("cosnt=",cos_nt)
+        # gaussians should now has shape B * C * W * H * K
+        sum_cos_nt = torch.sum(gaussians[:, :, :, :, 1:] * cos_nt[:, None, None, None, :], dim=-1)
+        dB = torch.sqrt(torch.tensor(2.0))*sum_cos_nt+gaussians[:, :, :, :, 0]
+        ################Wiener's Representation################
+        return 2*score - 2*sigma_t/g_t * dB
+
     def data_prediction_fn(self, x, t):
         """
         Return the data prediction model (with corrector).
@@ -455,6 +494,8 @@ class DPM_Solver:
         """
         if self.algorithm_type == "dpmsolver++":
             return self.data_prediction_fn(x, t)
+        elif self.algorithm_type == "dpmsolver_approx":
+            return self.noise_prediction_fn_approx(x, t, self.gaussians, self.n)
         else:
             return self.noise_prediction_fn(x, t)
 
@@ -1054,7 +1095,7 @@ class DPM_Solver:
 
     def sample(self, x, steps=20, t_start=None, t_end=None, order=2, skip_type='time_uniform',
         method='multistep', lower_order_final=True, denoise_to_zero=False, solver_type='dpmsolver',
-        atol=0.0078, rtol=0.05, return_intermediate=False,
+        atol=0.0078, rtol=0.05, return_intermediate=False, K_fourier=20
     ):
         """
         Compute the sample at time `t_end` by DPM-Solver, given the initial `x` at time `t_start`.
@@ -1173,6 +1214,15 @@ class DPM_Solver:
             assert method in ['multistep', 'singlestep', 'singlestep_fixed'], "Cannot use adaptive solver when correcting_xt_fn is not None"
         device = x.device
         intermediates = []
+        ################Wiener's Representation################
+        if self.algorithm_type == "dpmsolver_approx":
+            #print("using Wiener's representation to approximate Brownian motion")
+            #print(f"Fourier terms used {K_fourier}")
+            #print(f"working on device {device}")
+            shape = x.shape
+            self.gaussians = torch.randn(*shape, K_fourier+1).to(device)
+            self.n = torch.arange(1, K_fourier+1, dtype=torch.float32).to(device)
+        ################Wiener's Representation################
         with torch.no_grad():
             if method == 'adaptive':
                 x = self.dpm_solver_adaptive(x, order=order, t_T=t_T, t_0=t_0, atol=atol, rtol=rtol, solver_type=solver_type)

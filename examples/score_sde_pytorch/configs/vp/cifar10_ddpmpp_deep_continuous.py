@@ -44,6 +44,7 @@ def get_config():
   sampling.steps = 10
   sampling.skip_type = 'logSNR'
   sampling.rtol = 0.05
+  sampling.atol = 0.05
 
   # sampling.method = 'ode'
   # sampling.eps = 1e-4
